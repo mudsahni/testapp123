@@ -1,0 +1,226 @@
+
+
+name: Deploy to GCP
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+
+
+jobs:
+  check-and-update:
+    runs-on: ubuntu-latest
+    outputs:
+      is_first_run: ${{ steps.check_file.outputs.is_first_run }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          token: ${{ secrets.PAT }}
+
+      - name: Check for first run
+        id: check_file
+        run: |
+          if [ -f .github/workflows/first_run_completed ]; then
+            echo "is_first_run=false" >> $GITHUB_OUTPUT
+          else
+            echo "is_first_run=true" >> $GITHUB_OUTPUT
+          fi
+      - name: NOOP and Update Workflow
+        if: steps.check_file.outputs.is_first_run == 'true'
+        run: |
+          echo "Performing NOOP operation for first run"
+          touch .github/workflows/first_run_completed
+          # Remove the check-and-update job
+          sed -i '/^  check-and-update:/,/^  # End of section/d' .github/workflows/deploy.yml
+          
+          # Remove push and pull_request triggers
+          sed -i '/^on:/,/^jobs:/c\on:\n  workflow_dispatch:\n\njobs:' .github/workflows/deploy.yml
+          
+          # Remove the needs and if conditions from build-and-deploy job
+          sed -i '/needs:/d' .github/workflows/deploy.yml
+          sed -i '/if:/d' .github/workflows/deploy.yml
+          
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add .github/workflows/first_run_completed .github/workflows/deploy.yml
+          git commit -m "Remove NOOP job, push/pull_request triggers, and mark first run as completed"
+          git push
+
+  # End of section
+
+
+
+  build-and-deploy:
+    needs: check-and-update
+    if: needs.check-and-update.outputs.is_first_run == 'false'
+    runs-on: ubuntu-latest
+
+    env:
+      PROJECT_ID: paved-road-intuit
+      REGION: us-central1
+      IMAGE_NAME: testapp123
+      CLUSTER_NAME: testapp123-cluster
+
+
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: log1
+      run: |
+        timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        curl -X POST \
+          -H "Content-Type: application/json" \
+          -d "{\"timestamp\": \"$timestamp\", \"level\": \"info\", \"logger\": \"GithubAction\", \"message\":\"Repository has been checked out.\"}" \
+          https://logmachine-nfxik62jwa-uc.a.run.app/api/v1/log
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+
+    - name: log2
+      run: |
+        timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        curl -X POST \
+          -H "Content-Type: application/json" \
+          -d "{\"timestamp\": \"$timestamp\", \"level\": \"info\", \"logger\": \"GithubAction\", \"message\":\"Python has been set up.\"}" \
+          https://logmachine-nfxik62jwa-uc.a.run.app/api/v1/log
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: log3
+      run: |
+        timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        curl -X POST \
+          -H "Content-Type: application/json" \
+          -d "{\"timestamp\": \"$timestamp\", \"level\": \"info\", \"logger\": \"GithubAction\", \"message\":\"Python requirements installation complete.\"}" \
+          https://logmachine-nfxik62jwa-uc.a.run.app/api/v1/log
+
+    - name: Run tests
+      run: python -m unittest discover tests
+
+    - name: log4
+      run: |
+        timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        curl -X POST \
+          -H "Content-Type: application/json" \
+          -d "{\"timestamp\": \"$timestamp\", \"level\": \"info\", \"logger\": \"GithubAction\", \"message\":\"Tests run successfully.\"}" \
+          https://logmachine-nfxik62jwa-uc.a.run.app/api/v1/log
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: log5
+      run: |
+        timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        curl -X POST \
+          -H "Content-Type: application/json" \
+          -d "{\"timestamp\": \"$timestamp\", \"level\": \"info\", \"logger\": \"GithubAction\", \"message\":\"Docker build set up.\"}" \
+          https://logmachine-nfxik62jwa-uc.a.run.app/api/v1/log
+
+    - name: Google Auth
+      id: auth
+      uses: 'google-github-actions/auth@v1'
+      with:
+        credentials_json: '${{ secrets.GCP_SERVICE_ACCOUNT_CONFIG }}'
+
+    - name: log6
+      run: |
+        timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        curl -X POST \
+          -H "Content-Type: application/json" \
+          -d "{\"timestamp\": \"$timestamp\", \"level\": \"debug\", \"logger\": \"GithubAction\", \"message\":\"Google auth complete.\"}" \
+          https://logmachine-nfxik62jwa-uc.a.run.app/api/v1/log
+
+    - name: Set up Cloud SDK
+      uses: 'google-github-actions/setup-gcloud@v1'
+
+    - name: log7
+      run: |
+        timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        curl -X POST \
+          -H "Content-Type: application/json" \
+          -d "{\"timestamp\": \"$timestamp\", \"level\": \"info\", \"logger\": \"GithubAction\", \"message\":\"Google cloud sdk set up complete.\"}" \
+          https://logmachine-nfxik62jwa-uc.a.run.app/api/v1/log
+
+    - name: Configure Docker authentication
+      run: |
+        gcloud auth configure-docker gcr.io --quiet
+
+    - name: log8
+      run: |
+        timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        curl -X POST \
+          -H "Content-Type: application/json" \
+          -d "{\"timestamp\": \"$timestamp\", \"level\": \"debug\", \"logger\": \"GithubAction\", \"message\":\"Docker authentication complete.\"}" \
+          https://logmachine-nfxik62jwa-uc.a.run.app/api/v1/log
+
+    - name: Build and push Docker image
+      env:
+        GIT_TAG: ${{ github.sha }}
+      run: |
+        docker build -t gcr.io/${{ env.PROJECT_ID }}/${{ env.IMAGE_NAME }}:$GIT_TAG .
+        docker push gcr.io/${{ env.PROJECT_ID }}/${{ env.IMAGE_NAME }}:$GIT_TAG
+
+    - name: log9
+      run: |
+        timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        curl -X POST \
+          -H "Content-Type: application/json" \
+          -d "{\"timestamp\": \"$timestamp\", \"level\": \"info\", \"logger\": \"GithubAction\", \"message\":\"Docker build complete.\"}" \
+          https://logmachine-nfxik62jwa-uc.a.run.app/api/v1/log
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v2
+      with:
+        terraform_wrapper: false
+
+    - name: log10
+      run: |
+        timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        curl -X POST \
+          -H "Content-Type: application/json" \
+          -d "{\"timestamp\": \"$timestamp\", \"level\": \"info\", \"logger\": \"GithubAction\", \"message\":\"Terraform set up complete.\"}" \
+          https://logmachine-nfxik62jwa-uc.a.run.app/api/v1/log
+
+    - name: Terraform Init
+      run: terraform init
+      env:
+        GOOGLE_CREDENTIALS: ${{ secrets.GCP_SERVICE_ACCOUNT_CONFIG }}
+
+    - name: log11
+      run: |
+        timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        curl -X POST \
+          -H "Content-Type: application/json" \
+          -d "{\"timestamp\": \"$timestamp\", \"level\": \"info\", \"logger\": \"GithubAction\", \"message\":\"Terraform initialization compelte.\"}" \
+          https://logmachine-nfxik62jwa-uc.a.run.app/api/v1/log
+
+    - name: Terraform Apply
+      id: terraform-apply
+      run: |
+        terraform apply -auto-approve -var "project_id=${{ env.PROJECT_ID }}" -var "region=${{ env.REGION }}" -var "image_name=gcr.io/${{ env.PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+        echo "cloud_run_url=$(terraform output -raw cloud_run_url)" >> $GITHUB_OUTPUT
+      env:
+        GOOGLE_CREDENTIALS: ${{ secrets.GCP_SERVICE_ACCOUNT_CONFIG }}
+    - name: log12
+      run: |
+        timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        curl -X POST \
+          -H "Content-Type: application/json" \
+          -d "{\"timestamp\": \"$timestamp\", \"level\": \"info\", \"logger\": \"GithubAction\", \"message\":\"Deployment complete. The website is present at: ${{ steps.terraform-apply.outputs.cloud_run_url }}\"}" \
+          https://logmachine-nfxik62jwa-uc.a.run.app/api/v1/log
+
+
